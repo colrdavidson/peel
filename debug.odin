@@ -78,13 +78,47 @@ DWARF32_CU_Header :: struct #packed {
 	address_size: u8,
 }
 
+DWARF_V4_Line_Header :: struct #packed {
+	min_inst_length:  u8,
+	max_ops_per_inst: u8,
+	default_is_stmt:  u8,
+	line_base:        i8,
+	line_range:       u8,
+	opcode_base:      u8,
+}
+
+DWARF_V3_Line_Header :: struct #packed {
+	min_inst_length:  u8,
+	default_is_stmt:  u8,
+	line_base:        i8,
+	line_range:       u8,
+	opcode_base:      u8,
+}
+
+DWARF_Line_Header :: struct {
+	min_inst_length:  u8,
+	max_ops_per_inst: u8,
+	default_is_stmt:  u8,
+	line_base:        i8,
+	line_range:       u8,
+	opcode_base:      u8,
+}
+
+Line_Table :: struct {
+	opcode_base: u8,
+}
+
 Block :: struct {
 	id: int,
 	type: Dw_Tag,
 	attrs: map[Dw_At]Attr_Entry,
 
-	parent: ^Block,
-	children: [dynamic]^Block,
+	type_idx: int,
+	abstract_idx: int,
+
+	parent_idx: int,
+	au_offset: int,
+	children: [dynamic]int,
 }
 
 Attr_Data :: union {
@@ -413,38 +447,47 @@ print_abbrev_table :: proc(entries: []Abbrev_Unit) {
 	}
 }
 
-print_block_tree :: proc(node: ^Block, depth: int = 0) {
-	pad_buf := [4096]u8{}
-	b := strings.builder_from_slice(pad_buf[:])
-	for i := 0; i < depth; i += 1 {
-		strings.write_string(&b, "  ")
+print_block_tree :: proc(tree: ^[]Block, node_idx: int = 0, depth: int = 0) {
+	pad_buf := "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t"
+	if depth > len(pad_buf) {
+		panic("Tree too deep!\n")
 	}
+	padding := pad_buf[len(pad_buf) - depth:]
 
-	fmt.printf("%s%d | %s\n", strings.to_string(b), node.id, node.type)
+	node := tree[node_idx]
+
+	fmt.printf("%s%d | %s\n", padding, node.id, node.type)
 	for key, value in node.attrs {
-		fmt_result : string
-		#partial switch in value.data {
+		if key == Dw_At.type {
+			fmt.printf("%s - %s -- %d\n", padding, key, node.type_idx)
+			continue
+		} else if key == Dw_At.abstract_origin {
+			fmt.printf("%s - %s -- %d\n", padding, key, node.abstract_idx)
+			continue
+		}
+
+		switch in value.data {
 		case i64:
-			fmt.printf("%s - %s -- %d\n", strings.to_string(b), key, value.data)
+			fmt.printf("%s - %s -- %d\n", padding, key, value.data)
 		case u64:
-			fmt.printf("%s - %s -- %d\n", strings.to_string(b), key, value.data)
+			fmt.printf("%s - %s -- %d\n", padding, key, value.data)
 		case u32:
-			fmt.printf("%s - %s -- %d\n", strings.to_string(b), key, value.data)
+			fmt.printf("%s - %s -- %d\n", padding, key, value.data)
 		case u16:
-			fmt.printf("%s - %s -- %d\n", strings.to_string(b), key, value.data)
+			fmt.printf("%s - %s -- %d\n", padding, key, value.data)
 		case u8:
-			fmt.printf("%s - %s -- %d\n", strings.to_string(b), key, value.data)
+			fmt.printf("%s - %s -- %d\n", padding, key, value.data)
 		case []u8:
-			fmt.printf("%s - %s -- %x\n", strings.to_string(b), key, value.data)
+			fmt.printf("%s - %s -- %x\n", padding, key, value.data)
 		case bool:
-			fmt.printf("%s - %s -- %t\n", strings.to_string(b), key, value.data)
+			fmt.printf("%s - %s -- %t\n", padding, key, value.data)
 		case string:
-			fmt.printf("%s - %s -- %s\n", strings.to_string(b), key, value.data)
+			fmt.printf("%s - %s -- %s\n", padding, key, value.data)
 		}
 	}
 
 	for i := 0; i < len(node.children); i += 1 {
-		print_block_tree(node.children[i], depth + 1)
+		print_block_tree(tree, node.children[i], depth + 1)
 	}
 }
 
@@ -507,7 +550,7 @@ parse_attr_data :: proc(sections: ^map[string][]u8,  form: Dw_Form, data: []u8) 
 	return
 }
 
-load_block_table :: proc(sections: ^map[string][]u8) -> ^Block {
+load_block_tree :: proc(sections: ^map[string][]u8) -> []Block {
 	abbrev_blob := sections[".debug_abbrev"]
 
 	abbrevs := make([dynamic]Abbrev_Unit)
@@ -566,12 +609,15 @@ load_block_table :: proc(sections: ^map[string][]u8) -> ^Block {
 	info_blob := sections[".debug_info"]
 
 	MAX_BLOCK_STACK :: 30
-	entry_stack := [MAX_BLOCK_STACK]^Block{}
+	entry_stack := [MAX_BLOCK_STACK]int{}
 
-	head_block := new(Block)
+	blocks := make([dynamic]Block)
+
+	head_block := Block{}
 	head_block.type = Dw_Tag.program
-	head_block.children = make([dynamic]^Block)
-	entry_stack[0] = head_block
+	head_block.children = make([dynamic]int)
+	append(&blocks, head_block)
+	entry_stack[0] = 0
 
 	cur_cu_idx := 0
 	cur_blk_id := 1
@@ -626,10 +672,11 @@ load_block_table :: proc(sections: ^map[string][]u8) -> ^Block {
 				panic("Unable to find abbrev entry %d\n", abbrev_id)
 			}
 
-			blk := new(Block)
+			blk := Block{}
 			blk.type = au.type
 			blk.id = cur_blk_id
-			blk.parent = entry_stack[child_level - 1]
+			blk.parent_idx = entry_stack[child_level - 1]
+			blk.au_offset = i - 1
 
 			for j := 0; j < len(au.attrs_buf); {
 				attr_name, leb_size_1, err_1 := varint.decode_uleb128(au.attrs_buf[j:])
@@ -656,9 +703,11 @@ load_block_table :: proc(sections: ^map[string][]u8) -> ^Block {
 				blk.attrs[Dw_At(attr_name)] = Attr_Entry{form = Dw_Form(attr_form), data = data}
 				i += skip_size
 			}
+			append(&blocks, blk)
 
-			append(&entry_stack[child_level - 1].children, blk)
-			entry_stack[child_level] = blk
+			parent_idx := entry_stack[child_level - 1]
+			append(&blocks[parent_idx].children, cur_blk_id)
+			entry_stack[child_level] = cur_blk_id
 
 			if au.has_children {
 				if child_level + 1 >= len(entry_stack) {
@@ -670,10 +719,204 @@ load_block_table :: proc(sections: ^map[string][]u8) -> ^Block {
 
 			cur_blk_id += 1
 		}
+
+		cur_cu_idx += 1
 	}
 
+	// precache type info
+	for i := 0; i < len(blocks); i += 1 {
+		b1 := &blocks[i]
+		type_field, ok := b1.attrs[Dw_At.type]
+		if !ok {
+			continue
+		}
+		if type_field.form != Dw_Form.ref4 {
+			panic("Can't handle type field with form: %s\n", type_field.form)
+		}
 
-	return head_block
+		type_offset, tok := type_field.data.(u32)
+		if !tok {
+			panic("Unexpected data type! %s\n", type_field.data)
+		}
+
+		for j := 0; j < len(blocks); j += 1 {
+			b2 := &blocks[j]
+			if int(type_offset) == b2.au_offset {
+				b1.type_idx = j
+				break
+			}
+		}
+	}
+
+	// abstract origin info
+	for i := 0; i < len(blocks); i += 1 {
+		b1 := &blocks[i]
+		abstract_field, ok := b1.attrs[Dw_At.abstract_origin]
+		if !ok {
+			continue
+		}
+		if abstract_field.form != Dw_Form.ref4 {
+			panic("Can't handle type field with form: %s\n", abstract_field.form)
+		}
+
+		abstract_offset, tok := abstract_field.data.(u32)
+		if !tok {
+			panic("Unexpected data type! %s\n", abstract_field.data)
+		}
+
+		for j := 0; j < len(blocks); j += 1 {
+			b2 := &blocks[j]
+			if int(abstract_offset) == b2.au_offset {
+				b1.abstract_idx = j
+				break
+			}
+		}
+	}
+
+	return blocks[:]
+}
+
+load_file_table :: proc(sections: ^map[string][]u8) -> bool {
+	line_blob := sections[".debug_line"]
+
+	for i := 0; i < len(line_blob); {
+		unit_length, linek := slice_to_type(line_blob[i:], u32)
+		if !linek {
+			panic("Unable to read DWARF Section version!\n")
+		}
+		if unit_length == 0xFFFFFFFF {
+			panic("TODO debugger only supports 32 bit DWARF!\n")
+		}
+		i += size_of(unit_length)
+
+		if unit_length == 0 {
+			continue
+		}
+
+		version, vk := slice_to_type(line_blob[i:], u16)
+		if !vk {
+			panic("Unable to read section version\n")
+		}
+		if !(version == 3 || version == 4) {
+			panic("TODO This code supports DWARF 3 and 4, got %d\n", version)
+		}
+		i += size_of(version)
+
+		header_length, hdrk := slice_to_type(line_blob[i:], u32)
+		if !hdrk {
+			panic("Unable to read section header length\n")
+		}
+
+		// This looks squirrely, just prep for eventually handling DWARF64
+		header_length_size := size_of(u32)
+		i += header_length_size
+
+		line_hdr : DWARF_Line_Header
+		if version == 3 {
+			tmp_line_hdr, hdrk := slice_to_type(line_blob[i:], DWARF_V3_Line_Header)
+			if !hdrk {
+				panic("Unable to read section header\n")
+			}
+
+			line_hdr.min_inst_length  = tmp_line_hdr.min_inst_length;
+			line_hdr.default_is_stmt  = tmp_line_hdr.default_is_stmt;
+			line_hdr.line_base 	      = tmp_line_hdr.line_base;
+			line_hdr.line_range 	  = tmp_line_hdr.line_range;
+			line_hdr.opcode_base 	  = tmp_line_hdr.opcode_base;
+
+			i += size_of(tmp_line_hdr)
+
+		} else if version == 4 {
+			tmp_line_hdr, hdrk := slice_to_type(line_blob[i:], DWARF_V4_Line_Header)
+			if !hdrk {
+				panic("Unable to read section header\n")
+			}
+
+			line_hdr.min_inst_length  = tmp_line_hdr.min_inst_length;
+			line_hdr.max_ops_per_inst = tmp_line_hdr.max_ops_per_inst;
+			line_hdr.default_is_stmt  = tmp_line_hdr.default_is_stmt;
+			line_hdr.line_base 	      = tmp_line_hdr.line_base;
+			line_hdr.line_range 	  = tmp_line_hdr.line_range;
+			line_hdr.opcode_base 	  = tmp_line_hdr.opcode_base;
+
+			i += size_of(tmp_line_hdr)
+		}
+
+		//print_line_header(line_hdr)
+
+		if line_hdr.opcode_base != 13 {
+			panic("Can't handle weird number of line ops / extensions! %d\n", line_hdr.opcode_base)
+		}
+
+		// WTF?
+		opcode_table_len := line_hdr.opcode_base - 1
+		i += int(opcode_table_len)
+
+		dir_count := 1
+		for {
+			//TODO(cloin): Should this be capped at PATH_MAX?
+			dir_name := cstring(raw_data(line_blob[i:]))
+
+			i += len(dir_name) + 1
+			if len(dir_name) == 0 {
+				break
+			}
+
+			fmt.printf("DIR %d | %s\n", dir_count, dir_name)
+			dir_count += 1
+		}
+
+		file_count := 1
+		for {
+			//TODO(cloin): Should this be capped at PATH_MAX?
+			file_name := cstring(raw_data(line_blob[i:]))
+
+			i += len(file_name) + 1
+			if len(file_name) == 0 {
+				break
+			}
+
+			dir_idx, leb_size_1, err_1 := varint.decode_uleb128(line_blob[i:])
+			if err_1 != nil {
+				panic("Unable to read dir idx!\n")
+			}
+			i += leb_size_1
+
+			last_modified, leb_size_2, err_2 := varint.decode_uleb128(line_blob[i:])
+			if err_2 != nil {
+				panic("Unable to read last modified!\n")
+			}
+			i += leb_size_2
+
+			file_size, leb_size_3, err_3 := varint.decode_uleb128(line_blob[i:])
+			if err_3 != nil {
+				panic("Unable to read file size!\n")
+			}
+			i += leb_size_3
+
+			fmt.printf("FILE %d @ dir: %d | %s\n", file_count, dir_idx, file_name)
+			file_count += 1
+		}
+
+		full_cu_size  := unit_length + size_of(unit_length)
+		hdr_size := size_of(unit_length) + size_of(version) + int(header_length) + int(header_length_size)
+		rem_size := int(full_cu_size) - hdr_size
+
+		i += rem_size
+
+//		line_table := make([dynamic]Line_Table)
+
+	}
+
+	return false
+}
+
+print_line_header :: proc(hdr: DWARF_Line_Header) {
+	fmt.printf("min inst length:  %d\n", hdr.min_inst_length)
+	fmt.printf("default is stmt:  %d\n", hdr.default_is_stmt)
+	fmt.printf("line base:        %d\n", hdr.line_base)
+	fmt.printf("line range:       %d\n", hdr.line_range)
+	fmt.printf("opcode base:      %d\n", hdr.opcode_base)
 }
 
 print_sections_by_size :: proc(sections: ^map[string][]u8) {
@@ -707,6 +950,9 @@ main :: proc() {
 	sections := load_elf(binary_blob)
 //	print_sections_by_size(&sections)
 
-	head := load_block_table(&sections)
-	print_block_tree(head)
+	tree := load_block_tree(&sections)
+	print_block_tree(&tree)
+
+	file_table := load_file_table(&sections)
+//	print_file_table(file_table)
 }
