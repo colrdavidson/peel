@@ -194,6 +194,11 @@ Line_Table :: struct {
 	opcode_base: u8,
 }
 
+File_Unit :: struct {
+	name:       string,
+	dir_idx:       int,
+}
+
 Block :: struct {
 	id: int,
 	type: Dw_Tag,
@@ -814,8 +819,8 @@ load_block_tree :: proc(sections: ^map[string][]u8) -> []Block {
 			cu_hdr.address_size = tmp_hdr.address_size
 			cu_hdr.abbrev_offset = tmp_hdr.abbrev_offset
 
-			if cu_hdr.unit_type == .partial {
-				panic("Unable to handle partial units!\n")
+			if cu_hdr.unit_type != .compile {
+				panic("TODO only handles \"compile unit\", got a \"%s unit\"!\n", cu_hdr.unit_type)
 			}
 
 			i += size_of(tmp_hdr)
@@ -851,8 +856,9 @@ load_block_tree :: proc(sections: ^map[string][]u8) -> []Block {
 			blk.type = au.type
 			blk.id = cur_blk_id
 			blk.parent_idx = entry_stack[child_level - 1]
-			blk.au_offset = i - 1
+			blk.au_offset = i - leb_size_1
 			blk.cu_offset = cur_cu_offset
+
 			au_offset_lookup[u32(blk.au_offset)] = cur_blk_id
 
 			for j := 0; j < len(au.attrs_buf); {
@@ -901,6 +907,11 @@ load_block_tree :: proc(sections: ^map[string][]u8) -> []Block {
 		cur_cu_offset = i
 	}
 
+/*
+	tree := blocks[:]
+	print_block_tree(&tree)
+*/
+
 	// precache type + abstract info
 	for i := 0; i < len(blocks); i += 1 {
 		b1 := &blocks[i]
@@ -916,9 +927,10 @@ load_block_tree :: proc(sections: ^map[string][]u8) -> []Block {
 				panic("Unexpected data type! %s\n", type_field.data)
 			}
 
-			b2_id, tok2 := au_offset_lookup[u32(type_offset) + u32(b1.cu_offset)]
+			global_type_offset := u32(type_offset) + u32(b1.cu_offset)
+			b2_id, tok2 := au_offset_lookup[global_type_offset]
 			if !tok2 {
-				panic("Unable to find offset for type! %s\n", type_offset)
+				panic("Unable to find offset for type! %s\n", global_type_offset)
 			}
 			b1.type_idx = b2_id
 		}
@@ -934,9 +946,10 @@ load_block_tree :: proc(sections: ^map[string][]u8) -> []Block {
 				panic("Unexpected data type! %s\n", abstract_field.data)
 			}
 
-			b2_id, tok2 := au_offset_lookup[u32(abstract_offset) + u32(b1.cu_offset)]
+			global_abstract_offset := u32(abstract_offset) + u32(b1.cu_offset)
+			b2_id, tok2 := au_offset_lookup[global_abstract_offset]
 			if !tok2 {
-				panic("Unable to find offset for abstract! %s\n", type_field.data)
+				panic("Unable to find offset for abstract! 0x%x\n", global_abstract_offset)
 			}
 			b1.abstract_idx = b2_id
 		}
@@ -945,8 +958,13 @@ load_block_tree :: proc(sections: ^map[string][]u8) -> []Block {
 	return blocks[:]
 }
 
-load_file_table :: proc(sections: ^map[string][]u8) -> bool {
+load_file_table :: proc(sections: ^map[string][]u8) -> ([]string, []File_Unit) {
 	line_blob := sections[".debug_line"]
+
+	dir_table := make([dynamic]string)
+	file_table := make([dynamic]File_Unit)
+
+	append(&dir_table, "local")
 
 	for i := 0; i < len(line_blob); {
 		unit_length, linek := slice_to_type(line_blob[i:], u32)
@@ -1020,28 +1038,25 @@ load_file_table :: proc(sections: ^map[string][]u8) -> bool {
 		// WTF?
 		opcode_table_len := line_hdr.opcode_base - 1
 		i += int(opcode_table_len)
-
-		dir_count := 1
 		for {
 			//TODO(cloin): Should this be capped at PATH_MAX?
-			dir_name := cstring(raw_data(line_blob[i:]))
+			cstr_dir_name := cstring(raw_data(line_blob[i:]))
 
-			i += len(dir_name) + 1
-			if len(dir_name) == 0 {
+			i += len(cstr_dir_name) + 1
+			if len(cstr_dir_name) == 0 {
 				break
 			}
 
-			fmt.printf("DIR %d | %s\n", dir_count, dir_name)
-			dir_count += 1
+			dir_name := strings.clone_from_cstring(cstr_dir_name)
+			append(&dir_table, dir_name)
 		}
 
-		file_count := 1
 		for {
 			//TODO(cloin): Should this be capped at PATH_MAX?
-			file_name := cstring(raw_data(line_blob[i:]))
+			cstr_file_name := cstring(raw_data(line_blob[i:]))
 
-			i += len(file_name) + 1
-			if len(file_name) == 0 {
+			i += len(cstr_file_name) + 1
+			if len(cstr_file_name) == 0 {
 				break
 			}
 
@@ -1063,8 +1078,10 @@ load_file_table :: proc(sections: ^map[string][]u8) -> bool {
 			}
 			i += leb_size_3
 
-			fmt.printf("FILE %d @ dir: %d | %s\n", file_count, dir_idx, file_name)
-			file_count += 1
+
+			file_name := strings.clone_from_cstring(cstr_file_name)
+			fu := File_Unit{name = file_name, dir_idx = int(dir_idx)}
+			append(&file_table, fu)
 		}
 
 		full_cu_size  := unit_length + size_of(unit_length)
@@ -1077,7 +1094,14 @@ load_file_table :: proc(sections: ^map[string][]u8) -> bool {
 
 	}
 
-	return false
+	return dir_table[:], file_table[:]
+}
+
+print_file_table :: proc(dirs: []string, files: []File_Unit) {
+	for i := 0; i < len(files); i += 1 {
+		file := files[i]
+		fmt.printf("%d | %s/%s\n", i, dirs[file.dir_idx], file.name)
+	}
 }
 
 print_line_header :: proc(hdr: DWARF_Line_Header) {
@@ -1120,9 +1144,10 @@ main :: proc() {
 //	print_sections_by_size(&sections)
 	load_dynamic_libraries(&sections)
 
+
 	tree := load_block_tree(&sections)
 //	print_block_tree(&tree)
 
-	file_table := load_file_table(&sections)
-//	print_file_table(file_table)
+	dir_table, file_table := load_file_table(&sections)
+//	print_file_table(dir_table, file_table)
 }
