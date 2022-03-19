@@ -28,13 +28,73 @@ ET_EXEC :: 2
 ET_DYN  :: 3
 ET_CORE :: 4
 
-SHT_NULL     :: 0
-SHT_PROGBITS :: 1
-SHT_SYMTAB   :: 2
-SHT_STRTAB   :: 3
-SHT_RELA     :: 4
-SHT_HASH     :: 5
-SHT_DYNAMIC  :: 6
+
+Section_Header_Type :: enum u32 {
+	null     = 0,
+	progbits = 1,
+	symtab   = 2,
+	strtab   = 3,
+	rela     = 4,
+	hash     = 5,
+	dyn      = 6,
+	nobits   = 8,
+	rel      = 9,
+}
+
+Section_Type :: enum u32 {
+	null    = 0,
+	load    = 1,
+	dyn     = 2,
+	interp  = 3,
+	note    = 4,
+	shlib   = 5,
+	phdr    = 6,
+	tls     = 7,
+	gnu_eh_frame = 0x6474e550,
+	gnu_stack = 0x6474e551,
+	gnu_relro = 0x6474e552,
+	gnu_property = 0x6474e553,
+	lowproc = 0x70000000,
+	hiproc  = 0x7FFFFFFF,
+}
+
+Dynamic_Type :: enum u64 {
+	null         = 0,
+	needed       = 1,
+	plt_rel_size = 2,
+	plt_got      = 3,
+	hash         = 4,
+	strtab       = 5,
+	symtab       = 6,
+	rela         = 7,
+	rela_size    = 8,
+	rela_entry   = 9,
+	str_size     = 10,
+	symbol_entry = 11,
+	init         = 12,
+	fini         = 13,
+	so_name      = 14,
+	rpath        = 15,
+	symbolic     = 16,
+	rel          = 17,
+	rel_size     = 18,
+	rel_entry    = 19,
+	plt_rel      = 20,
+	debug        = 21,
+	text_rel     = 22,
+	jump_rel     = 23,
+	bind_now     = 24,
+	init_array   = 25,
+	init_array_size  = 26,
+	fini_array       = 27,
+	fini_array_size  = 28,
+	gnu_hash         = 0x6FFFFEF5,
+	version_symbol   = 0x6FFFFFF0,
+	version_need     = 0x6FFFFFFE,
+	version_need_num = 0x6FFFFFFF,
+	lo_proc          = 0x70000000,
+	hi_proc          = 0x7FFFFFFF,
+}
 
 ELF64_Header :: struct #packed {
 	magic: [4]u8,
@@ -60,7 +120,7 @@ ELF64_Header :: struct #packed {
 
 ELF64_Section_Header :: struct #packed {
 	name: u32,
-	type: u32,
+	type: Section_Header_Type,
 	flags: u64,
 	addr: u64,
 	offset: u64,
@@ -71,9 +131,35 @@ ELF64_Section_Header :: struct #packed {
 	entry_size: u64,
 }
 
-DWARF32_CU_Header :: struct #packed {
-	unit_length: u32,
-	version: u16,
+ELF64_Program_Header :: struct #packed {
+	type: Section_Type,
+	flags: u32,
+	offset: u64,
+	virtual_addr: u64,
+	physical_addr: u64,
+	file_size: u64,
+	mem_size: u64,
+	align: u64,
+}
+
+ELF64_Dyn :: struct #packed {
+	tag: Dynamic_Type,
+	val: u64,
+}
+
+DWARF32_CU_Header :: struct {
+	unit_type: Dw_Unit_Type,
+	address_size: u8,
+	abbrev_offset: u32,
+}
+
+DWARF32_V5_CU_Header :: struct #packed {
+	unit_type: Dw_Unit_Type,
+	address_size: u8,
+	abbrev_offset: u32,
+}
+
+DWARF32_V4_CU_Header :: struct #packed {
 	abbrev_offset: u32,
 	address_size: u8,
 }
@@ -118,6 +204,7 @@ Block :: struct {
 
 	parent_idx: int,
 	au_offset: int,
+	cu_offset: int,
 	children: [dynamic]int,
 }
 
@@ -146,6 +233,16 @@ Abbrev_Unit :: struct {
 	attrs_buf: []u8,
 }
 
+Dw_Unit_Type :: enum u8 {
+	compile       = 0x01,
+	type          = 0x02,
+	partial       = 0x03,
+	skeleton      = 0x04,
+	split_compile = 0x05,
+	split_type    = 0x06,
+	lo_user       = 0x80,
+	hi_user       = 0xFF,
+}
 
 Dw_Form :: enum {
 	addr         = 0x01,
@@ -338,39 +435,53 @@ sort_entries_by_length :: proc(m: ^$M/map[$K]$V, loc := #caller_location) {
 }
 
 load_elf :: proc(binary_blob: []u8) -> map[string][]u8 {
-	prog_hdr, rk := slice_to_type(binary_blob, ELF64_Header)
+	elf_hdr, rk := slice_to_type(binary_blob, ELF64_Header)
 	if !rk {
 		panic("Invalid ELF file!\n")
 	}
 
 	elf_magic := []u8{ 0x7f, 'E', 'L', 'F' }
-	if mem.compare(prog_hdr.magic[:], elf_magic) != 0 {
+	if mem.compare(elf_hdr.magic[:], elf_magic) != 0 {
 		panic("Invalid ELF file!\n")
 	}
 
-	if prog_hdr.hdr_version != 1 {
+	if elf_hdr.hdr_version != 1 {
 		panic("Your ELF is stupid\n")
 	}
 
-	if prog_hdr.class != ELFCLASS64 ||
-	   prog_hdr.endian != ELFDATA2LSB ||
-	   prog_hdr.machine != EM_X86_64 {
+	if elf_hdr.class != ELFCLASS64 ||
+	   elf_hdr.endian != ELFDATA2LSB ||
+	   elf_hdr.machine != EM_X86_64 {
 		panic("TODO only supports x86_64!\n")
 	}
 
-	if prog_hdr.type == ET_CORE {
+	if elf_hdr.type == ET_CORE {
 		panic("TODO add coredump support!\n")
 	}
 
-	if !(prog_hdr.type == ET_EXEC || prog_hdr.type == ET_DYN) {
+	if !(elf_hdr.type == ET_EXEC || elf_hdr.type == ET_DYN) {
 		panic("ELF file is not executable!\n")
 	}
 
-	if prog_hdr.section_hdr_offset > u64(len(binary_blob)) {
+	if elf_hdr.section_hdr_offset > u64(len(binary_blob)) {
 		panic("Invalid section header offset!\n")
 	}
 
-	str_table_hdr_idx := prog_hdr.section_hdr_offset + u64(prog_hdr.section_hdr_str_idx * prog_hdr.section_entry_size)
+	program_header_array_size := int(elf_hdr.program_hdr_num) * int(elf_hdr.program_hdr_entry_size)
+	program_header_blob := binary_blob[int(elf_hdr.program_hdr_offset):int(elf_hdr.program_hdr_offset)+program_header_array_size]
+	for i := 0; i < program_header_array_size; i += int(elf_hdr.program_hdr_entry_size) {
+		prog_hdr, pok := slice_to_type(program_header_blob[i:], ELF64_Program_Header)
+		if !pok {
+			panic("Failed to get program header!\n")
+		}
+
+		if prog_hdr.type == Section_Type.interp {
+			linker_path := binary_blob[prog_hdr.offset:prog_hdr.offset+prog_hdr.mem_size]
+			fmt.printf("Using dynamic linker: %s\n", cstring(raw_data(linker_path)))
+		}
+	}
+
+	str_table_hdr_idx := elf_hdr.section_hdr_offset + u64(elf_hdr.section_hdr_str_idx * elf_hdr.section_entry_size)
 	if str_table_hdr_idx > u64(len(binary_blob)) {
 		panic("Invalid str table header index!\n")
 	}
@@ -380,7 +491,7 @@ load_elf :: proc(binary_blob: []u8) -> map[string][]u8 {
 		panic("Invalid ELF file!\n")
 	}
 
-	if str_table_hdr.type != SHT_STRTAB {
+	if str_table_hdr.type != Section_Header_Type.strtab {
 		panic("Executable string table is borked!\n")
 	}
 
@@ -388,10 +499,11 @@ load_elf :: proc(binary_blob: []u8) -> map[string][]u8 {
 		panic("Invalid str table offset!\n")
 	}
 
+	section_header_array_size := int(elf_hdr.section_hdr_num) * int(elf_hdr.section_entry_size)
+	section_header_blob := binary_blob[int(elf_hdr.section_hdr_offset):int(elf_hdr.section_hdr_offset)+section_header_array_size]
 	sections := make(map[string][]u8)
-	for i := 0; i < int(prog_hdr.section_hdr_num); i += 1 {
-		section_idx := prog_hdr.section_hdr_offset + u64(i * int(prog_hdr.section_entry_size))
-		section_hdr, sk := slice_to_type(binary_blob[section_idx:], ELF64_Section_Header)
+	for i := 0; i < section_header_array_size; i += int(elf_hdr.section_entry_size) {
+		section_hdr, sk := slice_to_type(section_header_blob[i:], ELF64_Section_Header)
 		if !sk {
 			panic("Invalid ELF file!\n")
 		}
@@ -406,7 +518,11 @@ load_elf :: proc(binary_blob: []u8) -> map[string][]u8 {
 		}
 
 		section_name := strings.clone_from_cstring(cstring(raw_data(section_name_blob)))
-		sections[section_name] = binary_blob[section_hdr.offset:section_hdr.offset+section_hdr.size]
+		if section_hdr.type == Section_Header_Type.nobits || section_hdr.type == Section_Header_Type.null {
+			sections[section_name] = nil
+		} else {
+			sections[section_name] = binary_blob[section_hdr.offset:section_hdr.offset+section_hdr.size]
+		}
 	}
 
 	if !(".debug_abbrev" in sections &&
@@ -448,7 +564,7 @@ print_abbrev_table :: proc(entries: []Abbrev_Unit) {
 }
 
 print_block_tree :: proc(tree: ^[]Block, node_idx: int = 0, depth: int = 0) {
-	pad_buf := "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t"
+	pad_buf := [?]u8{0..<32 = '\t',}
 	if depth > len(pad_buf) {
 		panic("Tree too deep!\n")
 	}
@@ -456,8 +572,9 @@ print_block_tree :: proc(tree: ^[]Block, node_idx: int = 0, depth: int = 0) {
 
 	node := tree[node_idx]
 
-	fmt.printf("%s%d | %s\n", padding, node.id, node.type)
+	fmt.printf("%s%d | %s <%x>\n", padding, node.id, node.type, node.au_offset)
 	for key, value in node.attrs {
+/*
 		if key == Dw_At.type {
 			fmt.printf("%s - %s -- %d\n", padding, key, node.type_idx)
 			continue
@@ -465,18 +582,19 @@ print_block_tree :: proc(tree: ^[]Block, node_idx: int = 0, depth: int = 0) {
 			fmt.printf("%s - %s -- %d\n", padding, key, node.abstract_idx)
 			continue
 		}
+*/
 
 		switch in value.data {
 		case i64:
-			fmt.printf("%s - %s -- %d\n", padding, key, value.data)
+			fmt.printf("%s - %s -- %x\n", padding, key, value.data)
 		case u64:
-			fmt.printf("%s - %s -- %d\n", padding, key, value.data)
+			fmt.printf("%s - %s -- %x\n", padding, key, value.data)
 		case u32:
-			fmt.printf("%s - %s -- %d\n", padding, key, value.data)
+			fmt.printf("%s - %s -- %x\n", padding, key, value.data)
 		case u16:
-			fmt.printf("%s - %s -- %d\n", padding, key, value.data)
+			fmt.printf("%s - %s -- %x\n", padding, key, value.data)
 		case u8:
-			fmt.printf("%s - %s -- %d\n", padding, key, value.data)
+			fmt.printf("%s - %s -- %x\n", padding, key, value.data)
 		case []u8:
 			fmt.printf("%s - %s -- %x\n", padding, key, value.data)
 		case bool:
@@ -550,12 +668,38 @@ parse_attr_data :: proc(sections: ^map[string][]u8,  form: Dw_Form, data: []u8) 
 	return
 }
 
+load_dynamic_libraries :: proc(sections: ^map[string][]u8) {
+	dynamic_blob := sections[".dynamic"]
+	dynstr_blob := sections[".dynstr"]
+
+	for i := 0; i < len(dynamic_blob); i += size_of(ELF64_Dyn) {
+		dyn_entry, ok := slice_to_type(dynamic_blob[i:], ELF64_Dyn)
+		if !ok {
+			panic("Unable to read ELF dynamic tag\n")
+		}
+
+		if dyn_entry.tag == Dynamic_Type.needed {
+			section_name := cstring(raw_data(dynstr_blob[dyn_entry.val:]))
+			fmt.printf("%s %s\n", dyn_entry.tag, section_name);
+		} else {
+			//fmt.printf("%s 0x%x\n", dyn_entry.tag, dyn_entry.val);
+		}
+	}
+}
+
 load_block_tree :: proc(sections: ^map[string][]u8) -> []Block {
 	abbrev_blob := sections[".debug_abbrev"]
 
 	abbrevs := make([dynamic]Abbrev_Unit)
 
+	AU_ID_Lookup :: map[u64]int
+	cu_au_table := make([dynamic]AU_ID_Lookup)
+
+	lookup_1 := make(AU_ID_Lookup)
+	append(&cu_au_table, lookup_1)
+
 	cu_idx := 0
+	cu_start := 0
 	i := 0
 	for i < len(abbrev_blob) {
 		abbrev_code, leb_size_1, err_1 := varint.decode_uleb128(abbrev_blob[i:])
@@ -565,7 +709,11 @@ load_block_tree :: proc(sections: ^map[string][]u8) -> []Block {
 		i += leb_size_1
 
 		if abbrev_code == 0 {
+			cu_start = i
 			cu_idx += 1
+
+			new_lookup := make(AU_ID_Lookup)
+			append(&cu_au_table, new_lookup)
 			continue
 		}
 
@@ -603,8 +751,11 @@ load_block_tree :: proc(sections: ^map[string][]u8) -> []Block {
 		}
 
 		entry.attrs_buf = abbrev_blob[attrs_start:i]
+		cu_au_table[cu_idx][entry.id] = len(abbrevs)
 		append(&abbrevs, entry)
 	}
+
+	fmt.printf("File contains %d CUs\n", cu_idx)
 
 	info_blob := sections[".debug_info"]
 
@@ -612,6 +763,7 @@ load_block_tree :: proc(sections: ^map[string][]u8) -> []Block {
 	entry_stack := [MAX_BLOCK_STACK]int{}
 
 	blocks := make([dynamic]Block)
+	au_offset_lookup := make(map[u32]int)
 
 	head_block := Block{}
 	head_block.type = Dw_Tag.program
@@ -620,27 +772,57 @@ load_block_tree :: proc(sections: ^map[string][]u8) -> []Block {
 	entry_stack[0] = 0
 
 	cur_cu_idx := 0
+	cur_cu_offset := 0
 	cur_blk_id := 1
 	for i := 0; i < len(info_blob); {
-		version_chunk, infok := slice_to_type(info_blob[i:], u32)
-		if !infok {
-			panic("Unable to read DWARF CU version!\n")
+		unit_length, linek := slice_to_type(info_blob[i:], u32)
+		if !linek {
+			panic("Unable to read DWARF Section version!\n")
 		}
-		if version_chunk == 0xFFFFFFFF {
+		if unit_length == 0xFFFFFFFF {
 			panic("TODO debugger only supports 32 bit DWARF!\n")
 		}
+		i += size_of(unit_length)
 
-		cu_hdr, hdr_ok := slice_to_type(info_blob[i:], DWARF32_CU_Header)
-		if !infok {
-			panic("Unable to read DWARF CU version!\n")
+		version, vk := slice_to_type(info_blob[i:], u16)
+		if !vk {
+			panic("Unable to read section version\n")
 		}
-		if cu_hdr.version != 4 {
-			panic("TODO debugger only supports DWARF 4, got %d!\n", cu_hdr.version)
+		if !(version == 4 || version == 5) {
+			panic("Block parser only supports DWARF 4 and 5, got %d!\n", version)
 		}
-		i += size_of(cu_hdr)
+		i += size_of(version)
+
+		cu_hdr : DWARF32_CU_Header
+		if version == 4 {
+			tmp_hdr, vk := slice_to_type(info_blob[i:], DWARF32_V4_CU_Header)
+			if !vk {
+				panic("Unable to read v4 DWARF header\n")
+			}
+
+			cu_hdr.address_size = tmp_hdr.address_size
+			cu_hdr.abbrev_offset = tmp_hdr.abbrev_offset
+
+			i += size_of(tmp_hdr)
+		} else if version == 5 {
+			tmp_hdr, vk := slice_to_type(info_blob[i:], DWARF32_V5_CU_Header)
+			if !vk {
+				panic("Unable to read v5 DWARF header\n")
+			}
+
+			cu_hdr.unit_type = Dw_Unit_Type(tmp_hdr.unit_type)
+			cu_hdr.address_size = tmp_hdr.address_size
+			cu_hdr.abbrev_offset = tmp_hdr.abbrev_offset
+
+			if cu_hdr.unit_type == .partial {
+				panic("Unable to handle partial units!\n")
+			}
+
+			i += size_of(tmp_hdr)
+		}
 
 		if cu_hdr.address_size != 8 {
-			panic("TODO debugger only supports address size of 8!\n")
+			panic("TODO debugger only supports address size of 8, got %d!\n", cu_hdr.address_size)
 		}
 
 		child_level := 1
@@ -659,24 +841,19 @@ load_block_tree :: proc(sections: ^map[string][]u8) -> []Block {
 				continue
 			}
 
-			au : ^Abbrev_Unit = nil
-			for cur_au := 0; cur_au < len(abbrevs); cur_au += 1 {
-				tmp := abbrevs[cur_au]
-
-				if (tmp.id == u64(abbrev_id)) && (tmp.cu_idx == cur_cu_idx) {
-					au = &tmp
-					break
-				}
-			}
-			if au == nil {
+			abbrev_idx, aok := cu_au_table[cur_cu_idx][u64(abbrev_id)]
+			if !aok {
 				panic("Unable to find abbrev entry %d\n", abbrev_id)
 			}
+			au := &abbrevs[abbrev_idx]
 
 			blk := Block{}
 			blk.type = au.type
 			blk.id = cur_blk_id
 			blk.parent_idx = entry_stack[child_level - 1]
 			blk.au_offset = i - 1
+			blk.cu_offset = cur_cu_offset
+			au_offset_lookup[u32(blk.au_offset)] = cur_blk_id
 
 			for j := 0; j < len(au.attrs_buf); {
 				attr_name, leb_size_1, err_1 := varint.decode_uleb128(au.attrs_buf[j:])
@@ -721,55 +898,47 @@ load_block_tree :: proc(sections: ^map[string][]u8) -> []Block {
 		}
 
 		cur_cu_idx += 1
+		cur_cu_offset = i
 	}
 
-	// precache type info
+	// precache type + abstract info
 	for i := 0; i < len(blocks); i += 1 {
 		b1 := &blocks[i]
+
 		type_field, ok := b1.attrs[Dw_At.type]
-		if !ok {
-			continue
-		}
-		if type_field.form != Dw_Form.ref4 {
-			panic("Can't handle type field with form: %s\n", type_field.form)
-		}
-
-		type_offset, tok := type_field.data.(u32)
-		if !tok {
-			panic("Unexpected data type! %s\n", type_field.data)
-		}
-
-		for j := 0; j < len(blocks); j += 1 {
-			b2 := &blocks[j]
-			if int(type_offset) == b2.au_offset {
-				b1.type_idx = j
-				break
+		if ok {
+			if type_field.form != Dw_Form.ref4 {
+				panic("Can't handle type field with form: %s\n", type_field.form)
 			}
-		}
-	}
 
-	// abstract origin info
-	for i := 0; i < len(blocks); i += 1 {
-		b1 := &blocks[i]
-		abstract_field, ok := b1.attrs[Dw_At.abstract_origin]
-		if !ok {
-			continue
-		}
-		if abstract_field.form != Dw_Form.ref4 {
-			panic("Can't handle type field with form: %s\n", abstract_field.form)
-		}
-
-		abstract_offset, tok := abstract_field.data.(u32)
-		if !tok {
-			panic("Unexpected data type! %s\n", abstract_field.data)
-		}
-
-		for j := 0; j < len(blocks); j += 1 {
-			b2 := &blocks[j]
-			if int(abstract_offset) == b2.au_offset {
-				b1.abstract_idx = j
-				break
+			type_offset, tok := type_field.data.(u32)
+			if !tok {
+				panic("Unexpected data type! %s\n", type_field.data)
 			}
+
+			b2_id, tok2 := au_offset_lookup[u32(type_offset) + u32(b1.cu_offset)]
+			if !tok2 {
+				panic("Unable to find offset for type! %s\n", type_offset)
+			}
+			b1.type_idx = b2_id
+		}
+
+		abstract_field, ok2 := b1.attrs[Dw_At.abstract_origin]
+		if ok2 {
+			if abstract_field.form != Dw_Form.ref4 {
+				panic("Can't handle type field with form: %s\n", abstract_field.form)
+			}
+
+			abstract_offset, tok := abstract_field.data.(u32)
+			if !tok {
+				panic("Unexpected data type! %s\n", abstract_field.data)
+			}
+
+			b2_id, tok2 := au_offset_lookup[u32(abstract_offset) + u32(b1.cu_offset)]
+			if !tok2 {
+				panic("Unable to find offset for abstract! %s\n", type_field.data)
+			}
+			b1.abstract_idx = b2_id
 		}
 	}
 
@@ -949,9 +1118,10 @@ main :: proc() {
 
 	sections := load_elf(binary_blob)
 //	print_sections_by_size(&sections)
+	load_dynamic_libraries(&sections)
 
 	tree := load_block_tree(&sections)
-	print_block_tree(&tree)
+//	print_block_tree(&tree)
 
 	file_table := load_file_table(&sections)
 //	print_file_table(file_table)
