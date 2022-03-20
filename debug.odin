@@ -289,27 +289,27 @@ Abbrev_Unit :: struct {
 }
 
 Dw_Section_Binding :: enum u8 {
-	local  = 0x00,
-	global = 0x01,
-	weak   = 0x02,
-	loos   = 0x10,
-	hios   = 0x12,
-	loproc = 0x13,
-	hiproc = 0x15,
+	local  = 0,
+	global = 1,
+	weak   = 2,
+	loos   = 10,
+	hios   = 12,
+	loproc = 13,
+	hiproc = 15,
 }
 
 Dw_Symbol_Type :: enum u8 {
-	notype  = 0x00,
-	object  = 0x01,
-	func    = 0x02,
-	section = 0x03,
-	file    = 0x04,
-	common  = 0x05,
-	tls     = 0x06,
-	loos    = 0x10,
-	hios    = 0x12,
-	loproc  = 0x13,
-	hiproc  = 0x15,
+	notype  = 0,
+	object  = 1,
+	func    = 2,
+	section = 3,
+	file    = 4,
+	common  = 5,
+	tls     = 6,
+	loos    = 10,
+	hios    = 12,
+	loproc  = 13,
+	hiproc  = 15,
 }
 
 Dw_Unit_Type :: enum u8 {
@@ -1019,11 +1019,6 @@ load_block_tree :: proc(sections: ^map[string][]u8) -> []Block {
 		cur_cu_idx += 1
 		cur_cu_offset = i
 	}
-
-/*
-	tree := blocks[:]
-	print_block_tree(&tree)
-*/
 
 	// precache type + abstract info
 	for i := 0; i < len(blocks); i += 1 {
