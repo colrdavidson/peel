@@ -190,8 +190,49 @@ DWARF_Line_Header :: struct {
 	opcode_base:      u8,
 }
 
+Line_Machine :: struct {
+	address:         u64,
+	op_idx:          u32,
+	file_idx:        u32,
+	line_num:        u32,
+	col_num:         u32,
+	is_stmt:        bool,
+	basic_block:    bool,
+	end_sequence:   bool,
+	prologue_end:   bool,
+	epilogue_end:   bool,
+	epilogue_begin: bool,
+	isa:             u32,
+	discriminator:   u32,
+}
+
 Line_Table :: struct {
-	opcode_base: u8,
+	op_buffer:       []u8,
+	default_is_stmt: bool,
+	line_base:         i8,
+	line_range:        u8,
+	opcode_base:       u8,
+
+	lines: []Line_Machine,
+}
+
+Dw_LNS :: enum u8 {
+	extended         = 0x0,
+	copy             = 0x1,
+	advance_pc       = 0x2,
+	advance_line     = 0x3,
+	set_file         = 0x4,
+	set_column       = 0x5,
+	negate_stmt      = 0x6,
+	set_basic_block  = 0x7,
+	const_add_pc     = 0x8,
+	fixed_advance_pc = 0x9,
+	set_prologue_end = 0xa,
+}
+
+Dw_Line :: enum u8 {
+	end_sequence = 0x1,
+	set_address = 0x2,
 }
 
 File_Unit :: struct {
@@ -958,11 +999,25 @@ load_block_tree :: proc(sections: ^map[string][]u8) -> []Block {
 	return blocks[:]
 }
 
-load_file_table :: proc(sections: ^map[string][]u8) -> ([]string, []File_Unit) {
+print_line_machine :: proc(lm: ^Line_Machine) {
+	fmt.printf("%d:%d:%d | %b %b | <%x>\n", lm.file_idx, lm.line_num, lm.col_num, u8(lm.prologue_end), u8(lm.epilogue_begin), lm.address)
+}
+
+print_line_table :: proc(lts: []Line_Table) {
+	for i := 0; i < len(lts); i += 1 {
+		lt := lts[i]
+		for j := 0; j < len(lt.lines); j += 1 {
+			print_line_machine(&lt.lines[j])
+		}
+	}
+}
+
+load_file_table :: proc(sections: ^map[string][]u8) -> ([]string, []File_Unit, []Line_Table) {
 	line_blob := sections[".debug_line"]
 
 	dir_table := make([dynamic]string)
 	file_table := make([dynamic]File_Unit)
+	line_tables := make([dynamic]Line_Table)
 
 	append(&dir_table, "local")
 
@@ -1088,13 +1143,137 @@ load_file_table :: proc(sections: ^map[string][]u8) -> ([]string, []File_Unit) {
 		hdr_size := size_of(unit_length) + size_of(version) + int(header_length) + int(header_length_size)
 		rem_size := int(full_cu_size) - hdr_size
 
+		lt := Line_Table{}
+		lt.op_buffer = line_blob[i:i+rem_size]
+		lt.opcode_base = line_hdr.opcode_base
+		lt.line_base   = line_hdr.line_base
+		lt.line_range  = line_hdr.line_range
+
+		append(&line_tables, lt)
 		i += rem_size
-
-//		line_table := make([dynamic]Line_Table)
-
 	}
 
-	return dir_table[:], file_table[:]
+	for i := 0; i < len(line_tables); i += 1 {
+		line_table := &line_tables[i]
+
+		lm_state := Line_Machine{}
+		lm_state.file_idx = 1
+		lm_state.line_num = 1
+		lm_state.is_stmt = line_table.default_is_stmt
+
+		lines := make([dynamic]Line_Machine)
+
+		for j := 0; j < len(line_table.op_buffer); {
+			op_byte := line_table.op_buffer[j]
+
+			j += 1
+
+			if op_byte >= line_table.opcode_base {
+				real_op := op_byte - line_table.opcode_base
+
+				line_inc := int(line_table.line_base + i8(real_op % line_table.line_range))
+				addr_inc := int(real_op / line_table.line_range)
+
+				lm_state.line_num = u32(int(lm_state.line_num) + line_inc)
+				lm_state.address  = u64(int(lm_state.address) + addr_inc)
+
+				append(&lines, lm_state)
+
+				lm_state.discriminator  = 0
+				lm_state.basic_block    = false
+				lm_state.prologue_end   = false
+				lm_state.epilogue_begin = false
+
+				continue
+			}
+
+			op := Dw_LNS(op_byte)
+			if op == .extended {
+				j += 1
+
+				tmp := line_table.op_buffer[j]
+				real_op := Dw_Line(tmp)
+
+				#partial switch real_op {
+				case .end_sequence:
+					lm_state.end_sequence = true
+					append(&lines, lm_state)
+				case .set_address:
+					address := slice_to_type(line_table.op_buffer[j:], u64)
+					lm_state.address = address
+
+					j += size_of(address)
+				case:
+					panic("Unsupported special op %d!\n", tmp)
+				}
+
+				j += 1
+				continue
+			}
+
+			#partial switch op {
+			case .copy:
+				append(&lines, lm_state)
+
+				lm_state.discriminator  = 0
+				lm_state.basic_block    = false
+				lm_state.prologue_end   = false
+				lm_state.epilogue_begin = false
+			case .advance_pc:
+				addr_inc, leb_size, err := varint.decode_uleb128(line_table.op_buffer[j:])
+				if err != nil {
+					panic("Invalid file idx!\n")
+				}
+				lm_state.address = lm_state.address + u64(addr_inc)
+
+				j += leb_size
+			case .advance_line:
+				line_inc, leb_size, err := varint.decode_ileb128(line_table.op_buffer[j:])
+				if err != nil {
+					panic("Invalid line increment!\n")
+				}
+				lm_state.line_num = u32(int(lm_state.line_num) + int(line_inc))
+
+				j += leb_size
+			case .set_file:
+				file_idx, leb_size, err := varint.decode_uleb128(line_table.op_buffer[j:])
+				if err != nil {
+					panic("Invalid file idx!\n")
+				}
+				lm_state.file_idx = u32(file_idx)
+
+				j += leb_size
+			case .set_column:
+				col_num, leb_size, err := varint.decode_uleb128(line_table.op_buffer[j:])
+				if err != nil {
+					panic("Invalid column number!\n")
+				}
+				lm_state.col_num = u32(col_num)
+
+				j += leb_size
+			case .negate_stmt:
+				lm_state.is_stmt = !lm_state.is_stmt
+			case .set_basic_block:
+				lm_state.basic_block = true
+			case .const_add_pc:
+				addr_inc := (255 - line_table.opcode_base) / line_table.line_range
+				lm_state.address += u64(addr_inc)
+			case .fixed_advance_pc:
+				advance := slice_to_type(line_table.op_buffer[j:], u16)
+				lm_state.address += u64(advance)
+
+				j += size_of(advance)
+			case .set_prologue_end:
+				lm_state.prologue_end = true
+			case:
+				panic("Unsupported op %d\n", op_byte)
+			}
+		}
+
+		line_table.lines = lines[:]
+	}
+
+	return dir_table[:], file_table[:], line_tables[:]
 }
 
 print_file_table :: proc(dirs: []string, files: []File_Unit) {
@@ -1148,6 +1327,7 @@ main :: proc() {
 	tree := load_block_tree(&sections)
 //	print_block_tree(&tree)
 
-	dir_table, file_table := load_file_table(&sections)
+	dir_table, file_table, line_table := load_file_table(&sections)
 //	print_file_table(dir_table, file_table)
+//	print_line_table(line_table)
 }
