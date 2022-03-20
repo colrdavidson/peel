@@ -147,6 +147,15 @@ ELF64_Dyn :: struct #packed {
 	val: u64,
 }
 
+ELF64_Sym :: struct #packed {
+	name:  u32,
+	info:  u8,
+	other: u8,
+	shndx: u16,
+	value: u64,
+	size:  u64,
+}
+
 DWARF32_CU_Header :: struct {
 	unit_type: Dw_Unit_Type,
 	address_size: u8,
@@ -277,6 +286,30 @@ Abbrev_Unit :: struct {
 
 	has_children: bool,
 	attrs_buf: []u8,
+}
+
+Dw_Section_Binding :: enum u8 {
+	local  = 0x00,
+	global = 0x01,
+	weak   = 0x02,
+	loos   = 0x10,
+	hios   = 0x12,
+	loproc = 0x13,
+	hiproc = 0x15,
+}
+
+Dw_Symbol_Type :: enum u8 {
+	notype  = 0x00,
+	object  = 0x01,
+	func    = 0x02,
+	section = 0x03,
+	file    = 0x04,
+	common  = 0x05,
+	tls     = 0x06,
+	loos    = 0x10,
+	hios    = 0x12,
+	loproc  = 0x13,
+	hiproc  = 0x15,
 }
 
 Dw_Unit_Type :: enum u8 {
@@ -571,6 +604,7 @@ load_elf :: proc(binary_blob: []u8) -> map[string][]u8 {
 		}
 	}
 
+
 	if !(".debug_abbrev" in sections &&
 	     ".debug_line" in sections &&
 	     ".debug_info" in sections) {
@@ -712,6 +746,44 @@ parse_attr_data :: proc(sections: ^map[string][]u8,  form: Dw_Form, data: []u8) 
 	}
 
 	return
+}
+
+load_symbols :: proc(sections: ^map[string][]u8) -> bool {
+	symtab_blob := sections[".symtab"]
+	strtab_blob := sections[".strtab"]
+
+	dynsym_blob := sections[".dynsym"]
+	dynstr_blob := sections[".dynstr"]
+
+	fmt.printf("    Dynamic Symbols:\n")
+	for i := 0; i < len(dynsym_blob); i += size_of(ELF64_Sym) {
+		sym_entry, ok := slice_to_type(dynsym_blob[i:], ELF64_Sym)
+		if !ok {
+			panic("Unable to read ELF symbol tag\n")
+		}
+
+		bind := Dw_Section_Binding(u8(sym_entry.info >> 4))
+		type := Dw_Symbol_Type(u8(sym_entry.info & 0xf))
+
+		sym_name := cstring(raw_data(dynstr_blob[sym_entry.name:]))
+		fmt.printf("%06s %07s | %s\n", bind, type, sym_name)
+	}
+
+	fmt.printf("Non Dynamic Symbols:\n")
+	for i := 0; i < len(symtab_blob); i += size_of(ELF64_Sym) {
+		sym_entry, ok := slice_to_type(symtab_blob[i:], ELF64_Sym)
+		if !ok {
+			panic("Unable to read ELF symbol tag\n")
+		}
+
+		bind := Dw_Section_Binding(u8(sym_entry.info >> 4))
+		type := Dw_Symbol_Type(u8(sym_entry.info & 0xf))
+
+		sym_name := cstring(raw_data(strtab_blob[sym_entry.name:]))
+		fmt.printf("0x%08x - %06d B | %06s %07s | %s\n", sym_entry.value, sym_entry.size, bind, type, sym_name)
+	}
+
+	return false
 }
 
 load_dynamic_libraries :: proc(sections: ^map[string][]u8) {
@@ -1294,18 +1366,21 @@ print_line_header :: proc(hdr: DWARF_Line_Header) {
 print_sections_by_size :: proc(sections: ^map[string][]u8) {
 	sort_entries_by_length(sections)
 	for k, v in sections {
-		size := len(v) / 1024
+		kb_size := len(v) / 1024
+		mb_size := len(v) / (1024 * 1024)
 
 		str_buf := [4096]u8{}
 		b := strings.builder_from_slice(str_buf[:])
 
-		if size > 0 {
-			fmt.sbprintf(&b, "%d KB", size)
+		if mb_size > 0 {
+			fmt.sbprintf(&b, "%d MB", mb_size)
+		} else if kb_size > 0 {
+			fmt.sbprintf(&b, "%d KB", kb_size)
 		} else {
 			fmt.sbprintf(&b, "%d  B", len(v))
 		}
 
-		fmt.printf("%s %s\n", strings.left_justify(k, 21, " "), strings.right_justify(strings.to_string(b), 6, " "))
+		fmt.printf("%022s %07s\n", k, strings.to_string(b))
 	}
 }
 
@@ -1323,11 +1398,14 @@ main :: proc() {
 //	print_sections_by_size(&sections)
 	load_dynamic_libraries(&sections)
 
+	symbols := load_symbols(&sections)
+//	print_symbols(&symbols)
+
 
 	tree := load_block_tree(&sections)
 //	print_block_tree(&tree)
 
 	dir_table, file_table, line_table := load_file_table(&sections)
 //	print_file_table(dir_table, file_table)
-//	print_line_table(line_table)
+//  print_line_table(line_table)
 }
