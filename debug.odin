@@ -28,7 +28,6 @@ ET_EXEC :: 2
 ET_DYN  :: 3
 ET_CORE :: 4
 
-
 Section_Header_Type :: enum u32 {
 	null     = 0,
 	progbits = 1,
@@ -96,196 +95,24 @@ Dynamic_Type :: enum u64 {
 	hi_proc          = 0x7FFFFFFF,
 }
 
-ELF64_Header :: struct #packed {
-	magic: [4]u8,
-	class: u8,
-	endian: u8,
-	hdr_version: u8,
-	pad: [9]u8,
-
-	type: u16,
-	machine: u16,
-	version: u32,
-	entry: u64,
-	program_hdr_offset: u64,
-	section_hdr_offset: u64,
-	flags: u32,
-	ehsize: u16,
-	program_hdr_entry_size: u16,
-	program_hdr_num: u16,
-	section_entry_size: u16,
-	section_hdr_num: u16,
-	section_hdr_str_idx: u16,
-}
-
-ELF64_Section_Header :: struct #packed {
-	name: u32,
-	type: Section_Header_Type,
-	flags: u64,
-	addr: u64,
-	offset: u64,
-	size: u64,
-	link: u32,
-	info: u32,
-	addr_align: u64,
-	entry_size: u64,
-}
-
-ELF64_Program_Header :: struct #packed {
-	type: Section_Type,
-	flags: u32,
-	offset: u64,
-	virtual_addr: u64,
-	physical_addr: u64,
-	file_size: u64,
-	mem_size: u64,
-	align: u64,
-}
-
-ELF64_Dyn :: struct #packed {
-	tag: Dynamic_Type,
-	val: u64,
-}
-
-ELF64_Sym :: struct #packed {
-	name:  u32,
-	info:  u8,
-	other: u8,
-	shndx: u16,
-	value: u64,
-	size:  u64,
-}
-
-DWARF32_CU_Header :: struct {
-	unit_type: Dw_Unit_Type,
-	address_size: u8,
-	abbrev_offset: u32,
-}
-
-DWARF32_V5_CU_Header :: struct #packed {
-	unit_type: Dw_Unit_Type,
-	address_size: u8,
-	abbrev_offset: u32,
-}
-
-DWARF32_V4_CU_Header :: struct #packed {
-	abbrev_offset: u32,
-	address_size: u8,
-}
-
-DWARF_V4_Line_Header :: struct #packed {
-	min_inst_length:  u8,
-	max_ops_per_inst: u8,
-	default_is_stmt:  u8,
-	line_base:        i8,
-	line_range:       u8,
-	opcode_base:      u8,
-}
-
-DWARF_V3_Line_Header :: struct #packed {
-	min_inst_length:  u8,
-	default_is_stmt:  u8,
-	line_base:        i8,
-	line_range:       u8,
-	opcode_base:      u8,
-}
-
-DWARF_Line_Header :: struct {
-	min_inst_length:  u8,
-	max_ops_per_inst: u8,
-	default_is_stmt:  u8,
-	line_base:        i8,
-	line_range:       u8,
-	opcode_base:      u8,
-}
-
-Line_Machine :: struct {
-	address:         u64,
-	op_idx:          u32,
-	file_idx:        u32,
-	line_num:        u32,
-	col_num:         u32,
-	is_stmt:        bool,
-	basic_block:    bool,
-	end_sequence:   bool,
-	prologue_end:   bool,
-	epilogue_end:   bool,
-	epilogue_begin: bool,
-	isa:             u32,
-	discriminator:   u32,
-}
-
-Line_Table :: struct {
-	op_buffer:       []u8,
-	default_is_stmt: bool,
-	line_base:         i8,
-	line_range:        u8,
-	opcode_base:       u8,
-
-	lines: []Line_Machine,
-}
-
 Dw_LNS :: enum u8 {
-	extended         = 0x0,
-	copy             = 0x1,
-	advance_pc       = 0x2,
-	advance_line     = 0x3,
-	set_file         = 0x4,
-	set_column       = 0x5,
-	negate_stmt      = 0x6,
-	set_basic_block  = 0x7,
-	const_add_pc     = 0x8,
-	fixed_advance_pc = 0x9,
-	set_prologue_end = 0xa,
+	extended           = 0x0,
+	copy               = 0x1,
+	advance_pc         = 0x2,
+	advance_line       = 0x3,
+	set_file           = 0x4,
+	set_column         = 0x5,
+	negate_stmt        = 0x6,
+	set_basic_block    = 0x7,
+	const_add_pc       = 0x8,
+	fixed_advance_pc   = 0x9,
+	set_prologue_end   = 0xa,
+	set_epilogue_begin = 0xb,
 }
 
 Dw_Line :: enum u8 {
 	end_sequence = 0x1,
 	set_address = 0x2,
-}
-
-File_Unit :: struct {
-	name:       string,
-	dir_idx:       int,
-}
-
-Block :: struct {
-	id: int,
-	type: Dw_Tag,
-	attrs: map[Dw_At]Attr_Entry,
-
-	type_idx: int,
-	abstract_idx: int,
-
-	parent_idx: int,
-	au_offset: int,
-	cu_offset: int,
-	children: [dynamic]int,
-}
-
-Attr_Data :: union {
-	[]u8,
-	i64,
-	u64,
-	u32,
-	u16,
-	u8,
-	string,
-	bool,
-}
-
-Attr_Entry :: struct {
-	form: Dw_Form,
-	data: Attr_Data,
-}
-
-Abbrev_Unit :: struct {
-	id: u64,
-	cu_idx: int,
-	type: Dw_Tag,
-
-	has_children: bool,
-	attrs_buf: []u8,
 }
 
 Dw_Section_Binding :: enum u8 {
@@ -486,6 +313,244 @@ Dw_Tag :: enum {
 	program            = 0xff,
 }
 
+UserReg :: struct {
+	r15: u64,
+	r14: u64,
+	r13: u64,
+	r12: u64,
+	rbp: u64,
+	rbx: u64,
+	r11: u64,
+	r10: u64,
+	r9: u64,
+	r8: u64,
+	rax: u64,
+	rcx: u64,
+	rdx: u64,
+	rsi: u64,
+	rdi: u64,
+	orig_rax: u64,
+	rip: u64,
+	cs: u64,
+	eflags: u64,
+	rsp: u64,
+	ss: u64,
+	fs_base: u64,
+	gs_base: u64,
+	ds: u64,
+	es: u64,
+	fs: u64,
+	gs: u64,
+}
+
+ELF64_Header :: struct #packed {
+	magic: [4]u8,
+	class: u8,
+	endian: u8,
+	hdr_version: u8,
+	pad: [9]u8,
+
+	type: u16,
+	machine: u16,
+	version: u32,
+	entry: u64,
+	program_hdr_offset: u64,
+	section_hdr_offset: u64,
+	flags: u32,
+	ehsize: u16,
+	program_hdr_entry_size: u16,
+	program_hdr_num: u16,
+	section_entry_size: u16,
+	section_hdr_num: u16,
+	section_hdr_str_idx: u16,
+}
+
+ELF64_Section_Header :: struct #packed {
+	name: u32,
+	type: Section_Header_Type,
+	flags: u64,
+	addr: u64,
+	offset: u64,
+	size: u64,
+	link: u32,
+	info: u32,
+	addr_align: u64,
+	entry_size: u64,
+}
+
+ELF64_Program_Header :: struct #packed {
+	type: Section_Type,
+	flags: u32,
+	offset: u64,
+	virtual_addr: u64,
+	physical_addr: u64,
+	file_size: u64,
+	mem_size: u64,
+	align: u64,
+}
+
+ELF64_Dyn :: struct #packed {
+	tag: Dynamic_Type,
+	val: u64,
+}
+
+ELF64_Sym :: struct #packed {
+	name:  u32,
+	info:  u8,
+	other: u8,
+	shndx: u16,
+	value: u64,
+	size:  u64,
+}
+
+DWARF32_CU_Header :: struct {
+	unit_type: Dw_Unit_Type,
+	address_size: u8,
+	abbrev_offset: u32,
+}
+
+DWARF32_V5_CU_Header :: struct #packed {
+	unit_type: Dw_Unit_Type,
+	address_size: u8,
+	abbrev_offset: u32,
+}
+
+DWARF32_V4_CU_Header :: struct #packed {
+	abbrev_offset: u32,
+	address_size: u8,
+}
+
+DWARF_V4_Line_Header :: struct #packed {
+	min_inst_length:  u8,
+	max_ops_per_inst: u8,
+	default_is_stmt:  u8,
+	line_base:        i8,
+	line_range:       u8,
+	opcode_base:      u8,
+}
+
+DWARF_V3_Line_Header :: struct #packed {
+	min_inst_length:  u8,
+	default_is_stmt:  u8,
+	line_base:        i8,
+	line_range:       u8,
+	opcode_base:      u8,
+}
+
+DWARF_Line_Header :: struct {
+	min_inst_length:  u8,
+	max_ops_per_inst: u8,
+	default_is_stmt:  u8,
+	line_base:        i8,
+	line_range:       u8,
+	opcode_base:      u8,
+}
+
+Line_Machine :: struct {
+	address:         u64,
+	op_idx:          u32,
+	file_idx:        u32,
+	line_num:        u32,
+	col_num:         u32,
+	is_stmt:        bool,
+	basic_block:    bool,
+	end_sequence:   bool,
+	prologue_end:   bool,
+	epilogue_end:   bool,
+	epilogue_begin: bool,
+	isa:             u32,
+	discriminator:   u32,
+}
+
+Line_Table :: struct {
+	op_buffer:       []u8,
+	default_is_stmt: bool,
+	line_base:         i8,
+	line_range:        u8,
+	opcode_base:       u8,
+
+	lines: []Line_Machine,
+}
+
+Line_Info :: struct {
+	address:  u64,
+	is_func_frame_start: bool,
+	is_func_frame_end:   bool,
+	line_num: u32,
+	col_num:  u32,
+	file_idx: u32,
+}
+
+File_State :: struct {
+	lines: []Line_Info,
+	files: []File_Unit,
+	dirs:  []string,
+}
+
+
+File_Unit :: struct {
+	name:       string,
+	dir_idx:       int,
+}
+
+Block :: struct {
+	id: int,
+	type: Dw_Tag,
+	attrs: map[Dw_At]Attr_Entry,
+
+	type_idx: int,
+	abstract_idx: int,
+
+	parent_idx: int,
+	au_offset: int,
+	cu_offset: int,
+	children: [dynamic]int,
+}
+
+Block_Tree :: struct {
+	blocks: []Block,
+	funcs: map[string]u64,
+	vars: map[string]u64,
+}
+
+Symbol :: struct {
+	is_dynamic: bool,
+	value: u64,
+	size:  u64,
+	bind: Dw_Section_Binding,
+	type: Dw_Symbol_Type,
+	name: cstring,
+}
+
+Attr_Data :: union {
+	[]u8,
+	i64,
+	u64,
+	u32,
+	u16,
+	u8,
+	string,
+	bool,
+}
+
+Attr_Entry :: struct {
+	form: Dw_Form,
+	data: Attr_Data,
+}
+
+Abbrev_Unit :: struct {
+	id: u64,
+	cu_idx: int,
+	type: Dw_Tag,
+
+	has_children: bool,
+	attrs_buf: []u8,
+}
+
+FuncFrame :: struct {
+	start: u64,
+	end: u64,
+}
 
 panic :: proc(fmt_in: string, args: ..any) {
 	fmt.printf(fmt_in, ..args)
@@ -538,9 +603,11 @@ load_elf :: proc(binary_blob: []u8) -> map[string][]u8 {
 		panic("TODO add coredump support!\n")
 	}
 
+/*
 	if !(elf_hdr.type == ET_EXEC || elf_hdr.type == ET_DYN) {
 		panic("ELF file is not executable!\n")
 	}
+*/
 
 	if elf_hdr.section_hdr_offset > u64(len(binary_blob)) {
 		panic("Invalid section header offset!\n")
@@ -555,8 +622,8 @@ load_elf :: proc(binary_blob: []u8) -> map[string][]u8 {
 		}
 
 		if prog_hdr.type == Section_Type.interp {
-			linker_path := binary_blob[prog_hdr.offset:prog_hdr.offset+prog_hdr.mem_size]
-			fmt.printf("Using dynamic linker: %s\n", cstring(raw_data(linker_path)))
+			//linker_path := binary_blob[prog_hdr.offset:prog_hdr.offset+prog_hdr.mem_size]
+			//fmt.printf("Using dynamic linker: %s\n", cstring(raw_data(linker_path)))
 		}
 	}
 
@@ -604,12 +671,6 @@ load_elf :: proc(binary_blob: []u8) -> map[string][]u8 {
 		}
 	}
 
-
-	if !(".debug_abbrev" in sections &&
-	     ".debug_line" in sections &&
-	     ".debug_info" in sections) {
-		panic("TODO currently can't support binaries without debug symbols!\n")
-	}
 
 	return sections
 }
@@ -748,42 +809,62 @@ parse_attr_data :: proc(sections: ^map[string][]u8,  form: Dw_Form, data: []u8) 
 	return
 }
 
-load_symbols :: proc(sections: ^map[string][]u8) -> bool {
+load_symbols :: proc(sections: ^map[string][]u8) -> ([]Symbol, bool) {
 	symtab_blob := sections[".symtab"]
 	strtab_blob := sections[".strtab"]
 
 	dynsym_blob := sections[".dynsym"]
 	dynstr_blob := sections[".dynstr"]
 
-	fmt.printf("    Dynamic Symbols:\n")
+	symbols := make([dynamic]Symbol)
+
 	for i := 0; i < len(dynsym_blob); i += size_of(ELF64_Sym) {
 		sym_entry, ok := slice_to_type(dynsym_blob[i:], ELF64_Sym)
 		if !ok {
 			panic("Unable to read ELF symbol tag\n")
 		}
 
-		bind := Dw_Section_Binding(u8(sym_entry.info >> 4))
-		type := Dw_Symbol_Type(u8(sym_entry.info & 0xf))
+		symbol := Symbol{}
+		symbol.is_dynamic = true
+		symbol.size = 0
+		symbol.value = 0
+		symbol.bind = Dw_Section_Binding(u8(sym_entry.info >> 4))
+		symbol.type = Dw_Symbol_Type(u8(sym_entry.info & 0xf))
+		symbol.name = cstring(raw_data(dynstr_blob[sym_entry.name:]))
 
-		sym_name := cstring(raw_data(dynstr_blob[sym_entry.name:]))
-		fmt.printf("%06s %07s | %s\n", bind, type, sym_name)
+
+		append(&symbols, symbol)
 	}
 
-	fmt.printf("Non Dynamic Symbols:\n")
 	for i := 0; i < len(symtab_blob); i += size_of(ELF64_Sym) {
 		sym_entry, ok := slice_to_type(symtab_blob[i:], ELF64_Sym)
 		if !ok {
 			panic("Unable to read ELF symbol tag\n")
 		}
 
-		bind := Dw_Section_Binding(u8(sym_entry.info >> 4))
-		type := Dw_Symbol_Type(u8(sym_entry.info & 0xf))
+		symbol := Symbol{}
+		symbol.is_dynamic = false
+		symbol.value = sym_entry.value
+		symbol.size = sym_entry.size
+		symbol.bind = Dw_Section_Binding(u8(sym_entry.info >> 4))
+		symbol.type = Dw_Symbol_Type(u8(sym_entry.info & 0xf))
+		symbol.name = cstring(raw_data(strtab_blob[sym_entry.name:]))
 
-		sym_name := cstring(raw_data(strtab_blob[sym_entry.name:]))
-		fmt.printf("0x%08x - %06d B | %06s %07s | %s\n", sym_entry.value, sym_entry.size, bind, type, sym_name)
+
+		append(&symbols, symbol)
 	}
 
-	return false
+	return symbols[:], true
+}
+
+print_symbols :: proc(symbols: ^[]Symbol) {
+	for symbol in symbols {
+		if symbol.is_dynamic {
+			fmt.printf("%06s %07s | %s\n", symbol.bind, symbol.type, symbol.name)
+		} else {
+			fmt.printf("0x%08x - %06d B | %06s %07s | %s\n", symbol.value, symbol.size, symbol.bind, symbol.type, symbol.name)
+		}
+	}
 }
 
 load_dynamic_libraries :: proc(sections: ^map[string][]u8) {
@@ -797,21 +878,25 @@ load_dynamic_libraries :: proc(sections: ^map[string][]u8) {
 		}
 
 		if dyn_entry.tag == Dynamic_Type.needed {
-			section_name := cstring(raw_data(dynstr_blob[dyn_entry.val:]))
-			fmt.printf("%s %s\n", dyn_entry.tag, section_name);
+			//section_name := cstring(raw_data(dynstr_blob[dyn_entry.val:]))
+			//fmt.printf("%s %s\n", dyn_entry.tag, section_name);
 		} else {
 			//fmt.printf("%s 0x%x\n", dyn_entry.tag, dyn_entry.val);
 		}
 	}
 }
 
-load_block_tree :: proc(sections: ^map[string][]u8) -> []Block {
+load_block_tree :: proc(sections: ^map[string][]u8) -> Block_Tree {
 	abbrev_blob := sections[".debug_abbrev"]
 
 	abbrevs := make([dynamic]Abbrev_Unit)
 
 	AU_ID_Lookup :: map[u64]int
 	cu_au_table := make([dynamic]AU_ID_Lookup)
+
+	// func/var name -> block idx
+	_func_map := make(map[string]u64)
+	_var_map  := make(map[string]u64)
 
 	lookup_1 := make(AU_ID_Lookup)
 	append(&cu_au_table, lookup_1)
@@ -873,7 +958,7 @@ load_block_tree :: proc(sections: ^map[string][]u8) -> []Block {
 		append(&abbrevs, entry)
 	}
 
-	fmt.printf("File contains %d CUs\n", cu_idx)
+	//fmt.printf("File contains %d CUs\n", cu_idx)
 
 	info_blob := sections[".debug_info"]
 
@@ -1061,9 +1146,27 @@ load_block_tree :: proc(sections: ^map[string][]u8) -> []Block {
 			}
 			b1.abstract_idx = b2_id
 		}
+
+		if b1.type == Dw_Tag.subprogram {
+			name_field, ok3 := b1.attrs[Dw_At.name]
+			if !ok3 {
+				panic("Function without name?\n")
+			}
+
+			func_name := name_field.data.(string)
+			_func_map[func_name] = u64(i)
+		}
 	}
 
-	return blocks[:]
+
+	//fmt.printf("Got block of %s\n", blk.type)
+
+
+	tree := Block_Tree{}
+	tree.blocks = blocks[:]
+	tree.funcs = _func_map
+	tree.vars = _var_map
+	return tree
 }
 
 print_line_machine :: proc(lm: ^Line_Machine) {
@@ -1079,14 +1182,23 @@ print_line_table :: proc(lts: []Line_Table) {
 	}
 }
 
-load_file_table :: proc(sections: ^map[string][]u8) -> ([]string, []File_Unit, []Line_Table) {
+print_line_info :: proc(line_info: []Line_Info) {
+	for line in line_info {
+		fmt.printf("%d:%d:%d | %t %t | <%x>\n",
+			line.file_idx, line.line_num, line.col_num,
+			line.is_func_frame_start, line.is_func_frame_end, line.address,
+		)
+	}
+}
+
+load_file_table :: proc(sections: ^map[string][]u8) -> File_State {
 	line_blob := sections[".debug_line"]
 
 	dir_table := make([dynamic]string)
 	file_table := make([dynamic]File_Unit)
 	line_tables := make([dynamic]Line_Table)
 
-	append(&dir_table, "local")
+	append(&dir_table, ".")
 
 	for i := 0; i < len(line_blob); {
 		unit_length, linek := slice_to_type(line_blob[i:], u32)
@@ -1257,9 +1369,9 @@ load_file_table :: proc(sections: ^map[string][]u8) -> ([]string, []File_Unit, [
 			op := Dw_LNS(op_byte)
 			if op == .extended {
 				j += 1
-
 				tmp := line_table.op_buffer[j]
 				real_op := Dw_Line(tmp)
+				j += 1
 
 				#partial switch real_op {
 				case .end_sequence:
@@ -1274,7 +1386,6 @@ load_file_table :: proc(sections: ^map[string][]u8) -> ([]string, []File_Unit, [
 					panic("Unsupported special op %d!\n", tmp)
 				}
 
-				j += 1
 				continue
 			}
 
@@ -1324,6 +1435,7 @@ load_file_table :: proc(sections: ^map[string][]u8) -> ([]string, []File_Unit, [
 				lm_state.basic_block = true
 			case .const_add_pc:
 				addr_inc := (255 - line_table.opcode_base) / line_table.line_range
+
 				lm_state.address += u64(addr_inc)
 			case .fixed_advance_pc:
 				advance := slice_to_type(line_table.op_buffer[j:], u16)
@@ -1340,13 +1452,37 @@ load_file_table :: proc(sections: ^map[string][]u8) -> ([]string, []File_Unit, [
 		line_table.lines = lines[:]
 	}
 
-	return dir_table[:], file_table[:], line_tables[:]
+	line_info := make([dynamic]Line_Info)
+	for lt in line_tables {
+		for line in lt.lines {
+			li := Line_Info{}
+			li.address  = line.address
+			li.is_func_frame_start = line.prologue_end
+			li.is_func_frame_end   = line.epilogue_begin
+			li.line_num = line.line_num
+			li.col_num  = line.col_num
+			li.file_idx = line.file_idx
+			append(&line_info, li)
+		}
+	}
+
+	line_order :: proc(a, b: Line_Info) -> bool {
+		return a.address < b.address
+	}
+	slice.sort_by(line_info[:], line_order)
+
+	fs := File_State{}
+	fs.dirs = dir_table[:]
+	fs.files = file_table[:]
+	fs.lines = line_info[:]
+
+	return fs
 }
 
 print_file_table :: proc(dirs: []string, files: []File_Unit) {
 	for i := 0; i < len(files); i += 1 {
 		file := files[i]
-		fmt.printf("%d | %s/%s\n", i, dirs[file.dir_idx], file.name)
+		fmt.printf("%s/%s\n", dirs[file.dir_idx], file.name)
 	}
 }
 
@@ -1379,28 +1515,262 @@ print_sections_by_size :: proc(sections: ^map[string][]u8) {
 	}
 }
 
+SYS_execve :: 59
+execvp :: proc(path: string, argv: []string) -> int {
+	path_buf: [4096]u8
+	copy(path_buf[:], path)
+	path_buf[len(path)] = 0
+	path_cstr := cstring(raw_data(path_buf[:]))
+
+	argv_cstrs := make([]cstring, len(argv) + 1, context.temp_allocator)
+	for arg, i in argv {
+		argv_cstrs[i] = strings.clone_to_cstring(arg)
+	}
+	argv_cstrs[len(argv)] = nil
+
+	argv_ptr := slice.as_ptr(argv_cstrs)
+
+	// eww -- removing the transmute causes a compiler crash
+	return int(intrinsics.syscall(SYS_execve, transmute(uintptr)path_cstr, uintptr(argv_ptr), 0))
+}
+
+SYS_wait4 :: 61
+waitpid :: proc(pid: os.Pid, status: ^int, options: i32) -> int {
+	return int(intrinsics.syscall(SYS_wait4, i64(pid), uintptr(status), options, 0))
+}
+
+wifstopped :: proc(status: int) -> bool {
+	return (((status) & 0xFF) == 0x7F)
+}
+
+Linux_Error :: enum {
+	none = 0,
+	eperm = 1,
+	enoent = 2,
+	esrch = 3,
+	eintr = 4,
+	eio = 5,
+	enxio = 6,
+	e2big = 7,
+	enoexec = 8,
+	ebadf = 9,
+	echild = 10,
+	eagain = 11,
+	enomem = 12,
+	eaccess = 13,
+	efault = 14,
+}
+
+PTRACE_TRACEME :: 0
+PTRACE_PEEKDATA :: 2
+PTRACE_POKEDATA :: 5
+PTRACE_CONT :: 7
+PTRACE_SINGLESTEP :: 9
+PTRACE_GETREGS :: 12
+PTRACE_SETREGS :: 13
+SYS_ptrace :: 101
+ptrace :: proc(request: i64, pid: os.Pid, addr: rawptr, data: rawptr) -> int {
+	return int(intrinsics.syscall(SYS_ptrace, request, i64(pid), addr, data))
+}
+
+find_line_for_addr :: proc(fs: ^File_State, addr: u64) {
+	min_addr := fs.lines[0].address
+	max_addr := fs.lines[len(fs.lines)-1].address
+
+	if addr < min_addr || addr > max_addr {
+		//fmt.printf("no line info for %08x [%08x<>%08x]\n", addr, min_addr, max_addr)
+		return
+	}
+
+	for i := 0; i < len(fs.lines); i += 1 {
+		line := fs.lines[i]
+
+		if line.address >= addr {
+			file := fs.files[line.file_idx - 1]
+			fmt.printf("RIP: %08x -- Found %08x in %s/%s:%d\n", addr, line.address, fs.dirs[file.dir_idx], file.name, line.line_num)
+			return
+		}
+	}
+}
+
+set_breakpoint :: proc(pid: os.Pid, addr: u64) -> u64 {
+	orig_data : u64 = 0
+	ret := ptrace(PTRACE_PEEKDATA, pid, transmute(rawptr)addr, &orig_data)
+	if ret < 0 {
+		panic("ret: %s\n", Linux_Error(-ret))
+	}
+
+	// Replace first byte of code at addr with `int 3`
+	data_with_trap := (orig_data & (~u64(0xFF))) | 0xCC
+
+	ptrace(PTRACE_POKEDATA, pid, transmute(rawptr)addr, transmute(rawptr)data_with_trap)
+
+	return orig_data
+}
+
+/*
+	set:
+		- stash old code
+		- replace first byte with 0xCC
+	clear:
+		- restore old code
+		- step backwards over the lack of 0xCC to where the code should have been
+		- singlestep
+		- ???
+		- profit?
+*/
+
+clear_breakpoint :: proc(pid: os.Pid, addr: u64, orig_data: u64) {
+	fmt.printf("Clearing breakpoint set @ %08x\n", addr)
+
+	fmt.printf("Restoring %08x with %08x\n", addr, orig_data)
+
+	ptrace(PTRACE_POKEDATA, pid, transmute(rawptr)addr, transmute(rawptr)orig_data)
+
+	regs := UserReg{}
+	ptrace(PTRACE_GETREGS, pid, nil, &regs)
+	fmt.printf("%08x\n", regs.rip)
+
+	regs.rip -= 1
+	ptrace(PTRACE_SETREGS, pid, nil, &regs)
+}
+
+find_function_frame :: proc(fs: ^File_State, bt: ^Block_Tree, func_name: string) -> (FuncFrame, bool) {
+	ff := FuncFrame{}
+
+	blk_idx, ok := bt.funcs[func_name]
+	if !ok {
+		return ff, false
+	}
+
+	func_block := bt.blocks[blk_idx]
+	high_pc_attr, ok2 := func_block.attrs[Dw_At.high_pc]
+	if !ok2 {
+		panic("Function %s has no high frame?\n", func_name)
+	}
+
+	low_pc_attr, ok3 := func_block.attrs[Dw_At.low_pc]
+	if !ok3 {
+		panic("Function %s has no low frame?\n", func_name)
+	}
+
+	low_pc := u64(low_pc_attr.data.(u64))
+	high_pc := u64(high_pc_attr.data.(u32)) + low_pc
+
+	//TODO(cloin): replace me with better search.. eww
+	for line in fs.lines {
+		if line.address < low_pc {
+			continue
+		}
+
+		if line.address > high_pc {
+			panic("Failed to find line in function frame!\n")
+		}
+
+		if line.address >= low_pc && line.is_func_frame_start {
+			ff.start = line.address
+			ff.end = high_pc
+			return ff, true
+		}
+	}
+
+
+	return ff, false
+}
+
+
 main :: proc() {
 	if len(os.args) < 2 {
 		panic("Please provide the debugger a program to debug!\n")
 	}
 
-	binary_blob, ok := os.read_entire_file_from_filename(os.args[1])
+	bin_name := os.args[1]
+	binary_blob, ok := os.read_entire_file_from_filename(bin_name)
 	if !ok {
-		panic("Failed to load file: %s\n", os.args[1])
+		panic("Failed to load file: %s\n", bin_name)
 	}
 
 	sections := load_elf(binary_blob)
-//	print_sections_by_size(&sections)
-	load_dynamic_libraries(&sections)
 
-	symbols := load_symbols(&sections)
-//	print_symbols(&symbols)
+	if !(".debug_abbrev" in sections &&
+	     ".debug_line" in sections &&
+	     ".debug_info" in sections) {
+		panic("TODO currently can't support binaries without debug symbols!\n")
+	}
 
 
 	tree := load_block_tree(&sections)
-//	print_block_tree(&tree)
+	print_block_tree(&tree.blocks)
 
-	dir_table, file_table, line_table := load_file_table(&sections)
+	file_state := load_file_table(&sections)
 //	print_file_table(dir_table, file_table)
-//  print_line_table(line_table)
+//	print_line_info(file_state.lines)
+
+	symbols, ok2 := load_symbols(&sections)
+	if !ok2 {
+		panic("Couldn't load symbols\n")
+	}
+//	print_symbols(&symbols)
+
+	main_frame, ok3 := find_function_frame(&file_state, &tree, "main")
+	if !ok3 {
+		panic("Couldn't find main!\n")
+	}
+
+	fmt.printf("found main @ %08x\n", main_frame.start)
+	find_line_for_addr(&file_state, main_frame.start)
+
+	pid, err := os.fork()
+	if err != os.ERROR_NONE {
+		panic("Failed to fork?\n")
+	}
+
+	if pid == 0 {
+		ptrace(PTRACE_TRACEME, 0, nil, nil)
+
+		// Turn off stack address randomization for more consistent debugging
+		os.personality(os.ADDR_NO_RANDOMIZE)
+		execvp(bin_name, os.args[1:])
+
+		panic("Failed to run program %s\n", bin_name)
+	}
+
+	status : int = 0
+	waitpid(pid, &status, 0)
+	if (!wifstopped(status)) {
+		panic("Failed to stop!\n")
+	}
+
+	orig_data := set_breakpoint(pid, main_frame.start)
+
+	ptrace(PTRACE_CONT, pid, nil, nil)
+	waitpid(pid, &status, 0)
+	if (!wifstopped(status)) {
+		panic("Program bailed!\n")
+	}
+
+	has_cleared := false
+
+	for ;; {
+		regs := UserReg{}
+		ptrace(PTRACE_GETREGS, pid, nil, &regs)
+		//fmt.printf("RIP: 0x%x\n", regs.rip)
+
+		if !has_cleared && (regs.rip - 1) == main_frame.start {
+			regs.rip -= 1;
+			clear_breakpoint(pid, regs.rip, orig_data)
+			has_cleared = true
+		}
+
+		find_line_for_addr(&file_state, regs.rip)
+
+		ptrace(PTRACE_SINGLESTEP, pid, nil, nil)
+		waitpid(pid, &status, 0)
+		if (!wifstopped(status)) {
+			fmt.printf("Program bailed!\n")
+			break;
+		}
+	}
+
+	os.exit(0)
 }
